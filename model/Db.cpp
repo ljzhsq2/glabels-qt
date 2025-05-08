@@ -231,13 +231,13 @@ namespace glabels
 		{
 			if ( !id.isNull() && !id.isEmpty() )
 			{
-				if ( id == "roll" )
-				{
-					return tr("Roll");
-				}
-				else
+				if ( id == "other" )
 				{
 					return tr("Other");
+				}
+				else if ( id == "roll" )
+				{
+					return tr("Roll");
 				}
 
 				const Paper *paper = lookupPaperFromId( id );

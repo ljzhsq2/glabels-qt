@@ -96,4 +96,12 @@ if (Qt6Test_FOUND)
   target_link_libraries (TestVariables Model Qt6::Test)
   add_test (NAME Variables COMMAND TestVariables)
 
+  #=======================================
+  # Test StrUtil class
+  #=======================================
+  qt6_wrap_cpp (TestStrUtil_moc_sources TestStrUtil.h)
+  add_executable (TestStrUtil TestStrUtil.cpp ${TestStrUtil_moc_sources})
+  target_link_libraries (TestStrUtil Model Qt6::Test)
+  add_test (NAME StrUtil COMMAND TestStrUtil)
+
 endif (Qt6Test_FOUND)
