@@ -40,6 +40,7 @@ namespace glabels
 
 		setIcon( QIcon( MiniPreviewPixmap( tmplate, SIZE, SIZE ) ) );
 		setText( tmplate->name() );
+		setToolTip( tmplate->name() );
 		
 		setFlags( Qt::ItemIsSelectable | Qt::ItemIsEnabled );
 	}
