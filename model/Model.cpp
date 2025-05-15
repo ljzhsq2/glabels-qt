@@ -343,7 +343,7 @@ namespace glabels
 			else
 			{
 				QFileInfo fileInfo( mFileName );
-				return fileInfo.baseName();
+				return fileInfo.completeBaseName();
 			}
 		}
 
