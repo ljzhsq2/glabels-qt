@@ -18,9 +18,12 @@
  *  along with gLabels-qt.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+
 #include "TemplatePickerItem.h"
 
 #include "MiniPreviewPixmap.h"
+
+#include "model/Settings.h"
 
 #include <QHBoxLayout>
 #include <QIcon>
@@ -33,16 +36,46 @@ namespace glabels
 	///
 	/// Constructor
 	///
-	TemplatePickerItem::TemplatePickerItem( model::Template *tmplate, QListWidget *parent )
-		: QListWidgetItem(parent)
+	TemplatePickerItem::TemplatePickerItem( model::Template*    tmplate,
+	                                        QListView::ViewMode mode,
+	                                        QListWidget*        parent )
+		: QListWidgetItem( parent )
 	{
 		mTmplate = tmplate;
 
 		setIcon( QIcon( MiniPreviewPixmap( tmplate, SIZE, SIZE ) ) );
-		setText( tmplate->name() );
-		setToolTip( tmplate->name() );
+		setMode( mode );
 		
 		setFlags( Qt::ItemIsSelectable | Qt::ItemIsEnabled );
+	}
+
+
+	///
+	/// Configure for given View Mode
+	///
+	void TemplatePickerItem::setMode( QListView::ViewMode mode )
+	{
+		auto* frame = mTmplate->frames().first();
+
+		switch ( mode )
+		{
+			
+		case QListView::IconMode:
+			setText( mTmplate->name() );
+			break;
+
+		case QListView::ListMode:
+			setText( "<b>" + mTmplate->name() + "</b><br/>" +
+			         mTmplate->description() + "<br/>" +
+			         frame->sizeDescription( model::Settings::units() ) + "<br/>" +
+			         frame->layoutDescription() );
+			break;
+			
+		default:
+			qWarning() << "TemplatePickerItem: unknown mode!";
+			break;
+
+		}
 	}
 
 

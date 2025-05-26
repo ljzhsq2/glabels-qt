@@ -18,8 +18,10 @@
  *  along with gLabels-qt.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+
 #include "SelectProductDialog.h"
 
+#include "Icons.h"
 #include "NotebookUtil.h"
 #include "TemplatePickerItem.h"
 
@@ -36,9 +38,10 @@ namespace glabels
 	/// Constructor
 	///
 	SelectProductDialog::SelectProductDialog( QWidget *parent )
-		: QDialog(parent), mCanceled(false)
+		: QDialog(parent)
 	{
 		setupUi( this );
+		productInfoWidget->setVisible( false );
 
 		pageSizeIsoCheck->setChecked( model::Settings::searchIsoPaperSizes() );
 		pageSizeUsCheck->setChecked( model::Settings::searchUsPaperSizes() );
@@ -65,6 +68,17 @@ namespace glabels
 
 		NotebookUtil::establishSize( modeNotebook );
 
+		if ( templatePicker->mode() == QListView::IconMode )
+		{
+			viewModeButton->setIcon( Icons::ViewList() );
+			viewModeButton->setToolTip( tr( "List View" ) );
+		}
+		else
+		{
+			viewModeButton->setIcon( Icons::ViewGrid() );
+			viewModeButton->setToolTip( tr( "Grid View" ) );
+		}
+		
 		QList<model::Template*> tmplates = model::Db::templates();
 		templatePicker->setTemplates( tmplates );
 
@@ -82,7 +96,7 @@ namespace glabels
 	///
 	const model::Template* SelectProductDialog::tmplate() const
 	{
-		if ( !mCanceled )
+		if ( mHasSelection )
 		{
 			return templatePicker->selectedTemplate();
 		}
@@ -190,12 +204,82 @@ namespace glabels
 
 
 	///
+	/// View Mode Button Clicked Slot
+	///
+	void SelectProductDialog::onViewModeButtonClicked()
+	{
+		if ( templatePicker->mode() == QListView::IconMode )
+		{
+			templatePicker->setMode( QListView::ListMode );
+
+			viewModeButton->setIcon( Icons::ViewList() );
+			viewModeButton->setToolTip( tr( "List View" ) );
+		}
+		else
+		{
+			templatePicker->setMode( QListView::IconMode );
+
+			viewModeButton->setIcon( Icons::ViewGrid() );
+			viewModeButton->setToolTip( tr( "Grid View" ) );
+		}
+	}
+
+
+	///
 	/// Template Picker Selection Changed Slot
 	///
 	void SelectProductDialog::onTemplatePickerSelectionChanged()
 	{
-		// Delay close.  This should make the selection more apparent to the user.
-		mTimer.start( 125, this );
+		auto* tmplate   = templatePicker->selectedTemplate();
+		if ( !tmplate )
+		{
+			productInfoWidget->setVisible( false );
+			selectButton->setEnabled( false );
+			return;
+		}
+		
+		auto* frame     = tmplate->frames().first();
+
+		preview->setTemplate( tmplate );
+
+		const model::Vendor* vendor = model::Db::lookupVendorFromName( tmplate->brand() );
+		if ( (vendor != nullptr) && (vendor->url() != nullptr) )
+		{
+			QString markup = QString( "<a href='%1'>%2</a>" ).arg( vendor->url(), vendor->name() );
+			vendorLabel->setText( markup );
+		}
+		else
+		{
+			vendorLabel->setText( tmplate->brand() );
+		}
+
+		if ( tmplate->productUrl() != nullptr )
+		{
+			QString markup = QString( "<a href='%1'>%2</a>" ).arg( tmplate->productUrl(), tmplate->part() );
+			partLabel->setText( markup );
+		}
+		else
+		{
+			partLabel->setText( tmplate->part() );
+		}
+
+		descriptionLabel->setText( tmplate->description() );
+		pageSizeLabel->setText( tmplate->paperDescription( model::Settings::units() ) );
+		labelSizeLabel->setText( frame->sizeDescription( model::Settings::units() ) );
+		layoutLabel->setText( frame->layoutDescription() );
+
+		productInfoWidget->setVisible( true );
+		selectButton->setEnabled( true );
+	}
+
+
+	///
+	/// Select Button Clicked Slot
+	///
+	void SelectProductDialog::onSelectButtonClicked()
+	{
+		mHasSelection = true;
+		close();
 	}
 
 
@@ -204,17 +288,6 @@ namespace glabels
 	///
 	void SelectProductDialog::onCancelButtonClicked()
 	{
-		mCanceled = true;
-		close();
-	}
-
-
-	///
-	/// Cancel Button Clicked Slot
-	///
-	void SelectProductDialog::timerEvent( QTimerEvent *event )
-	{
-		mTimer.stop();
 		close();
 	}
 

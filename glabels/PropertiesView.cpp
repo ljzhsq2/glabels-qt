@@ -18,6 +18,7 @@
  *  along with gLabels-qt.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+
 #include "PropertiesView.h"
 
 #include "SelectProductDialog.h"
@@ -100,11 +101,12 @@ namespace glabels
 	///
 	void PropertiesView::onLabelSizeChanged()
 	{
-		const model::Template* tmplate   = mModel->tmplate();
-		const model::Frame*    frame     = tmplate->frames().first();
-		bool                   isRotated = mModel->rotate();
+		auto* tmplate   = mModel->tmplate();
+		auto* frame     = tmplate->frames().first();
+		bool  isRotated = mModel->rotate();
 
 		preview->setTemplate( tmplate );
+		preview->setShowArrow( true );
 		preview->setRotate( isRotated );
 
 		const model::Vendor* vendor = model::Db::lookupVendorFromName( tmplate->brand() );
@@ -129,15 +131,9 @@ namespace glabels
 		}
 
 		descriptionLabel->setText( tmplate->description() );
-
-		QString pgSizeString = model::Db::lookupPaperNameFromId( tmplate->paperId() );
-		pageSizeLabel->setText( pgSizeString );
-
-		QString labelSizeString = frame->sizeDescription( mUnits );
-		labelSizeLabel->setText( labelSizeString );
-
-		QString layoutString = frame->layoutDescription();
-		layoutLabel->setText( layoutString );
+		pageSizeLabel->setText( tmplate->paperDescription( mUnits ) );
+		labelSizeLabel->setText( frame->sizeDescription( mUnits ) );
+		layoutLabel->setText( frame->layoutDescription() );
 
 		QStringList list = model::Db::getNameListOfSimilarTemplates( tmplate->name() );
 		if ( list.isEmpty() )
