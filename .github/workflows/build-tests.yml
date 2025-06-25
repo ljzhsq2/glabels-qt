@@ -4,10 +4,10 @@
 #     - ubuntu-latest  - clang
 #     - ubuntu-24.04   - gcc   (For backwards compatablity)
 #     - windows-latest - cl
+#     - macos-latest   - clang
 #
 # TODO:
-#     - macos
-#     - install optional dependencies for windows-latest test build
+#     - install optional dependencies for windows-latest and macos-latest
       
 
 name: Multi-Platform Build Tests
@@ -25,33 +25,27 @@ jobs:
       fail-fast: false
 
       matrix:
-        os: [ubuntu-latest, ubuntu-22.04, windows-latest]
-        build_type: [Release]
-        c_compiler: [gcc, clang, cl]
         include:
           - os: ubuntu-latest
+            build_type: Release
             c_compiler: gcc
             cpp_compiler: g++
           - os: ubuntu-latest
+            build_type: Release
             c_compiler: clang
             cpp_compiler: clang++
           - os: ubuntu-22.04
+            build_type: Release
             c_compiler: gcc
             cpp_compiler: g++
           - os: windows-latest
+            build_type: Release
             c_compiler: cl
             cpp_compiler: cl
-        exclude:
-          - os: ubuntu-latest
-            c_compiler: cl
-          - os: ubuntu-22.04
+          - os: macos-latest
+            build_type: Release
             c_compiler: clang
-          - os: ubuntu-22.04
-            c_compiler: cl
-          - os: windows-latest
-            c_compiler: gcc
-          - os: windows-latest
-            c_compiler: clang
+            cpp_compiler: clang++
 
     steps:
     - name: Checkout
@@ -61,8 +55,8 @@ jobs:
         fetch-depth: 0
 
     - name: Install optional dependencies (Ubuntu)
-      shell: bash
       if: startsWith( matrix.os, 'ubuntu-' )
+      shell: bash
       run: |
         # install packages
         sudo apt-get update
@@ -74,6 +68,18 @@ jobs:
         #  - currently must be done before qt installed, because of errors
         #    trying to build qzint
         wget https://downloads.sourceforge.net/project/zint/zint/2.6.5/zint-2.6.5.tar.gz && tar xzf zint-2.6.5.tar.gz && ( cd zint-2.6.5 && mkdir build && cd build && cmake .. && make && sudo make install )
+
+    - name: Install optional dependencies (Windows)
+      if: startsWith( matrix.os, 'windows-' )
+      shell: bash
+      run: |
+        # install packages
+
+    - name: Install optional dependencies (MacOS)
+      if: startsWith( matrix.os, 'macos-' )
+      shell: bash
+      run: |
+        # install packages
 
     - name: Install Qt
       uses: jurplel/install-qt-action@v4
@@ -106,5 +112,10 @@ jobs:
 
     - name: Test (Windows)
       if: startsWith( matrix.os, 'windows-' )
+      working-directory: ${{ steps.strings.outputs.build-output-dir }}
+      run: ctest --build-config ${{ matrix.build_type }}
+
+    - name: Test (MacOS)
+      if: startsWith( matrix.os, 'macos-' )
       working-directory: ${{ steps.strings.outputs.build-output-dir }}
       run: ctest --build-config ${{ matrix.build_type }}
