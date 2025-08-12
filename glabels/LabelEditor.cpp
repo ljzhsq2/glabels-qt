@@ -38,6 +38,7 @@
 #include "model/Markup.h"
 #include "model/Settings.h"
 
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QtMath>
 #include <QtDebug>
@@ -105,6 +106,7 @@ namespace glabels
 
 		setMouseTracking( true );
 		setFocusPolicy(Qt::StrongFocus);
+		setAcceptDrops( true );
 
 		connect( model::Settings::instance(), SIGNAL(changed()), this, SLOT(onSettingsChanged()) );
 		onSettingsChanged();
@@ -590,7 +592,7 @@ namespace glabels
 				//
 				if ( mState == IdleState )
 				{
-					emit contextMenuActivate();
+					emit contextMenuActivate( model::Point( xWorld, yWorld ) );
 				}
 			}
 		}
@@ -621,7 +623,7 @@ namespace glabels
 			/*
 			 * Emit signal regardless of mode
 			 */
-			emit pointerMoved( xWorld, yWorld );
+			emit pointerMoved( model::Point( xWorld, yWorld ) );
 
 
 			/*
@@ -1027,6 +1029,85 @@ namespace glabels
 	}
 
 
+	//
+	// Handle drag enter event
+	//
+	void LabelEditor::dragEnterEvent( QDragEnterEvent *event )
+	{
+		if ( event->mimeData()->hasUrls()   ||
+		     event->mimeData()->hasImage()  ||
+		     event->mimeData()->hasText() )
+		{
+			event->acceptProposedAction();
+		}
+		else
+		{
+			event->ignore();
+		}
+	}
+
+
+	//
+	// Handle drag move event
+	//
+	void LabelEditor::dragMoveEvent( QDragMoveEvent *event )
+	{
+		if ( event->mimeData()->hasUrls()   ||
+		     event->mimeData()->hasImage()  ||
+		     event->mimeData()->hasText() )
+		{
+			event->acceptProposedAction();
+		}
+		else
+		{
+			event->ignore();
+		}
+	}
+
+
+	//
+	// Handle drop event
+	//
+	void LabelEditor::dropEvent( QDropEvent *event )
+	{
+		/*
+		 * Transform to label coordinates
+		 */
+		QTransform transform;
+
+		transform.scale( mScale, mScale );
+		transform.translate( mX0.pt(), mY0.pt() );
+
+		QPointF pWorld = transform.inverted().map( event->position() );
+		auto xWorld = model::Distance::pt( pWorld.x() );
+		auto yWorld = model::Distance::pt( pWorld.y() );
+		auto p = model::Point( xWorld, yWorld );
+
+		if ( event->mimeData()->hasUrls() )
+		{
+			mUndoRedoModel->checkpoint( tr("Drop") );
+			mModel->pasteAsUrls( event->mimeData(), p );
+			event->acceptProposedAction();
+		}
+		else if ( event->mimeData()->hasImage() )
+		{
+			mUndoRedoModel->checkpoint( tr("Drop") );
+			mModel->pasteAsImage( event->mimeData(), p );
+			event->acceptProposedAction();
+		}
+		else if ( event->mimeData()->hasText() )
+		{
+			mUndoRedoModel->checkpoint( tr("Drop") );
+			mModel->pasteAsText( event->mimeData(), p );
+			event->acceptProposedAction();
+		}
+		else
+		{
+			event->ignore();
+		}
+	}
+
+
 	///
 	/// Draw Background Layer
 	///
@@ -1282,5 +1363,6 @@ namespace glabels
 
 		emit zoomChanged();
 	}
+
 
 } // namespace glabels

@@ -33,7 +33,6 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QFileInfo>
-#include <QMimeData>
 #include <QtDebug>
 
 
@@ -1480,65 +1479,128 @@ namespace glabels
 			const QClipboard *clipboard = QApplication::clipboard();
 			const QMimeData *mimeData = clipboard->mimeData();
 
-			if ( mimeData->hasFormat( MIME_TYPE ) )
-			{
-				return true;
-			}
-			else if ( mimeData->hasImage() )
-			{
-				return true;
-			}
-			else if ( mimeData->hasText() )
-			{
-				return true;
-			}
-			return false;
+			return  mimeData->hasFormat( MIME_TYPE ) ||
+				mimeData->hasUrls()              ||
+				mimeData->hasImage()             ||
+				mimeData->hasText();
 		}
 
 
 		///
 		/// Paste from clipboard
 		///
-		void Model::paste()
+		void Model::paste( Point p )
 		{
 			const QClipboard *clipboard = QApplication::clipboard();
 			const QMimeData *mimeData = clipboard->mimeData();
 
 			if ( mimeData->hasFormat( MIME_TYPE ) )
 			{
-				// Native objects
-				QByteArray buffer = mimeData->data( MIME_TYPE );
-				QList <ModelObject*> objects = XmlLabelParser::deserializeObjects( buffer, this );
-
-				unselectAll();
-				foreach ( ModelObject* object, objects )
-				{
-					addObject( object );
-					selectObject( object );
-				}
+				pasteAsNativeObjects( mimeData, p );
+			}
+			else if ( mimeData->hasUrls() )
+			{
+				pasteAsUrls( mimeData, p );
 			}
 			else if ( mimeData->hasImage() )
 			{
-				// Create object from clipboard image
-				auto* object = new ModelImageObject();
-				object->setImage( qvariant_cast<QImage>(mimeData->imageData()) );
-				object->setSize( object->naturalSize() );
-				object->setPosition( (w()-object->w())/2.0, (h()-object->h())/2.0 );
-				addObject( object );
-				unselectAll();
-				selectObject( object );
+				pasteAsImage( mimeData, p );
 			}
 			else if ( mimeData->hasText() )
 			{
-				// Create object from clipboard text
-				auto* object = new ModelTextObject();
-				object->setText( mimeData->text() );
-				object->setSize( object->naturalSize() );
-				object->setPosition( (w()-object->w())/2.0, (h()-object->h())/2.0 );
+				pasteAsText( mimeData, p );
+			}
+		}
+
+
+		///
+		/// Paste as native objects
+		///
+		void Model::pasteAsNativeObjects( const QMimeData* mimeData, Point p )
+		{
+			QByteArray buffer = mimeData->data( MIME_TYPE );
+			QList <ModelObject*> objects = XmlLabelParser::deserializeObjects( buffer, this );
+
+			unselectAll();
+			foreach ( ModelObject* object, objects )
+			{
+				object->setPositionRelative( p.x(), p.y() );
 				addObject( object );
-				unselectAll();
 				selectObject( object );
 			}
+		}
+
+		
+		///
+		/// Paste as URLs ( currently only supports local image files )
+		///
+		void Model::pasteAsUrls( const QMimeData* mimeData, Point p )
+		{
+			auto x = p.x();
+			auto y = p.y();
+			auto xOffset = Distance::pt( 10 );
+			auto yOffset = Distance::pt( 10 );
+			
+			unselectAll();
+			for ( auto url : mimeData->urls() )
+			{
+				if ( url.isLocalFile() )
+				{
+					auto name = url.toLocalFile();
+					QImage image( name );
+					if ( !image.isNull() )
+					{
+						auto* object = new ModelImageObject();
+						object->setImage( name, image );
+						object->setSize( object->naturalSize() );
+						object->setPosition( x, y );
+						addObject( object );
+						selectObject( object );
+
+						x = fmod( x + xOffset, w() );
+						y = fmod( y + yOffset, h() );
+					}
+					else
+					{
+						qWarning() << "Cannot paste" << name
+						           << ": does not exist or currently unsupported file type.";
+					}
+				}
+				else
+				{
+					qWarning() << "Cannot paste" << url.toString()
+					           << ": currently unsupported file location.";
+				}
+			}
+		}
+
+		
+		///
+		/// Paste as image
+		///
+		void Model::pasteAsImage( const QMimeData* mimeData, Point p )
+		{
+			auto* object = new ModelImageObject();
+			object->setImage( qvariant_cast<QImage>(mimeData->imageData()) );
+			object->setSize( object->naturalSize() );
+			object->setPosition( p.x(), p.y() );
+			addObject( object );
+			unselectAll();
+			selectObject( object );
+		}
+
+		
+		///
+		/// Paste as text
+		void Model::pasteAsText( const QMimeData* mimeData, Point p )
+		{
+			auto* object = new ModelTextObject();
+			object->setText( mimeData->text() );
+			object->setSize( object->naturalSize() );
+			object->setPosition( p.x(), p.y() );
+			addObject( object );
+			unselectAll();
+			selectObject( object );
 		}
 
 
