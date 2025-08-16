@@ -47,7 +47,9 @@ tar xzf zint-2.15.0-src.tar.gz
 cd zint-2.15.0-src/
 mkdir build && cd build && cmake .. && make
 sudo make install
+sudo ldconfig
 ```
+
 _GNU Barcode (Optional)_
 
 ```
