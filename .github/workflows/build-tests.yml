@@ -9,18 +9,29 @@ jobs:
   build:
     runs-on: windows-latest
 
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            build_type: Release
+            c_compiler: cl
+            cpp_compiler: cl
+
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Pre-install vcpkg (Windows)
+        if: startsWith( matrix.os, 'windows-' )
         shell: bash
         run: |
           git clone --depth 1 https://github.com/microsoft/vcpkg.git
 
       - name: Restore vcpkg cache (Windows)
+        if: startsWith(matrix.os, 'windows-')
         uses: actions/cache@v4
         with:
           path: |
@@ -30,9 +41,11 @@ jobs:
           restore-keys: |
             vcpkg-${{ runner.os }}-
 
-      - name: Install dependencies with vcpkg
+      - name: Install optional dependencies (Windows)
+        if: startsWith( matrix.os, 'windows-' )
         shell: bash
         run: |
+          # install packages
           ./vcpkg/bootstrap-vcpkg.sh
           ./vcpkg/vcpkg install pkgconf zlib libqrencode zint
           echo "TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
@@ -44,26 +57,68 @@ jobs:
           install-deps: 'true'
           archives: 'qtbase qtsvg qttools icu qttranslations'
 
+      - name: Set reusable strings
+        id: strings
+        shell: bash
+        run: |
+          echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+
       - name: Configure CMake
         run: >
-          cmake -B ${{ github.workspace }}/build
-          -DCMAKE_CXX_COMPILER=cl
-          -DCMAKE_C_COMPILER=cl
-          -DCMAKE_BUILD_TYPE=Release
+          cmake -B ${{ steps.strings.outputs.build-output-dir }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           -DCMAKE_TOOLCHAIN_FILE=${{ env.TOOLCHAIN_FILE }}
           -S ${{ github.workspace }}
 
       - name: Build
-        run: cmake --build ${{ github.workspace }}/build --config Release
+        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
 
-      - name: Package build artifacts
-        shell: bash
+      - name: Test (Windows)
+        if: startsWith( matrix.os, 'windows-' )
+        working-directory: ${{ steps.strings.outputs.build-output-dir }}
+        run: ctest --build-config ${{ matrix.build_type }}
+
+      - name: Package application
+        id: package_app
+        shell: pwsh
         run: |
-          # 假设你的可执行文件在 build/Release 目录下
-          cd ${{ github.workspace }}/build/Release
-          # 创建一个 zip 包，包含所有需要的文件
-          zip -r glabels-qt-windows.zip ./*
-
+          # 找到编译好的可执行文件
+          $exePath = Get-ChildItem -Path "${{ steps.strings.outputs.build-output-dir }}\Release\*.exe" | Select-Object -First 1
+          if (-not $exePath) {
+              Write-Host "Error: No executable found in the build directory."
+              exit 1
+          }
+          
+          # 创建一个临时的打包目录
+          $tempDir = New-Item -Path ".\temp_package" -ItemType "directory"
+          
+          # 将可执行文件复制到打包目录
+          Copy-Item -Path $exePath.FullName -Destination $tempDir.FullName
+          
+          # 使用 windeployqt.exe 自动复制所需的 Qt 依赖项
+          # 找到 windeployqt.exe 的路径
+          $windeployqtPath = "${{ env.QT_ROOT_DIR }}\bin\windeployqt.exe"
+          if (-not (Test-Path $windeployqtPath)) {
+              Write-Host "Error: windeployqt.exe not found."
+              exit 1
+          }
+          
+          # 运行 windeployqt
+          & $windeployqtPath $tempDir.FullName\$($exePath.Name) --no-translations
+          
+          # 找到 vcpkg 提供的依赖项并复制（例如 zlib, zint 等）
+          # 这部分需要根据实际依赖调整
+          $vcpkgInstalledDir = "${{ github.workspace }}\vcpkg\installed\x64-windows"
+          Copy-Item -Path "$vcpkgInstalledDir\bin\*.dll" -Destination $tempDir.FullName
+          
+          # 将打包目录压缩成 zip
+          Compress-Archive -Path $tempDir.FullName -DestinationPath "glabels-qt-windows.zip"
+          
+          Write-Host "::set-output name=archive-path::glabels-qt-windows.zip"
+          Write-Host "::set-output name=archive-name::glabels-qt-windows.zip"
+          
       - name: Create GitHub Release
         id: create_release
         uses: actions/create-release@v1
@@ -80,8 +135,3 @@ jobs:
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ github.workspace }}/build/Release/glabels-qt-windows.zip
-          asset_name: glabels-qt-windows.zip
-          asset_content_type: application/zip
