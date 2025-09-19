@@ -139,3 +139,13 @@ jobs:
       if: startsWith( matrix.os, 'macos-' )
       working-directory: ${{ steps.strings.outputs.build-output-dir }}
       run: ctest --build-config ${{ matrix.build_type }}
+
+    - name: Upload Release Asset (Windows only)
+      if: startsWith(matrix.os, 'windows-')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          ${{ steps.strings.outputs.build-output-dir }}/Release/*.exe
+          ${{ steps.strings.outputs.build-output-dir }}/Release/*.msi
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
