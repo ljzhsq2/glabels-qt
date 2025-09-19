@@ -91,17 +91,11 @@ jobs:
         # 打包
         7z a glabels-qt-windows-x64.zip ./release/*
 
-    - name: Create Release
-      id: create_release
+    - name: Upload to Release
       if: startsWith(github.ref, 'refs/tags/')
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v1
       with:
-        tag_name: ${{ github.ref_name }}
-        release_name: Release ${{ github.ref_name }}
-        draft: false
-        prerelease: false
+        files: glabels-qt-windows-x64.zip
         body: |
           ## Windows Release
           
@@ -115,17 +109,8 @@ jobs:
           ### Changes
           - Built with MSVC on Windows
           - Includes all necessary dependencies
-
-    - name: Upload Release Asset
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./glabels-qt-windows-x64.zip
-        asset_name: glabels-qt-windows-x64.zip
-        asset_content_type: application/zip
 
     - name: Upload artifacts (for manual runs)
       if: ${{ !startsWith(github.ref, 'refs/tags/') }}
