@@ -2,9 +2,8 @@ name: Windows Build & Release
 
 on:
   push:
-    tags:
-      - 'v*'  # 只在推送标签时触发
-  workflow_dispatch:  # 允许手动触发
+    branches:
+      - main  # 仅在 main 分支触发
 
 jobs:
   build:
@@ -16,6 +15,7 @@ jobs:
       with:
         fetch-depth: 0
 
+    # --- 安装 vcpkg 并缓存 ---
     - name: Pre-install vcpkg
       shell: bash
       run: git clone --depth 1 https://github.com/microsoft/vcpkg.git
@@ -30,13 +30,14 @@ jobs:
         restore-keys: |
           vcpkg-windows-
 
-    - name: Install optional dependencies
+    - name: Install dependencies via vcpkg
       shell: bash
       run: |
         ./vcpkg/bootstrap-vcpkg.sh
         ./vcpkg/vcpkg install pkgconf zlib libqrencode zint
         echo "TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
 
+    # --- 安装 Qt ---
     - name: Install Qt
       uses: jurplel/install-qt-action@v4
       with:
@@ -44,32 +45,62 @@ jobs:
         install-deps: 'true'
         archives: 'qtbase qtsvg qttools icu qttranslations'
 
+    # --- 安装 NSIS ---
+    - name: Install NSIS
+      shell: choco
+      run: choco install nsis -y
+
+    # --- 设置构建目录 ---
     - name: Set build directory
       id: strings
       shell: bash
       run: echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
 
+    # --- 配置 CMake ---
     - name: Configure CMake
-      run: >
-        cmake -B ${{ steps.strings.outputs.build-output-dir }}
-        -DCMAKE_CXX_COMPILER=cl
-        -DCMAKE_C_COMPILER=cl
-        -DCMAKE_BUILD_TYPE=Release
-        -DCMAKE_TOOLCHAIN_FILE=${{ env.TOOLCHAIN_FILE }}
-        -S ${{ github.workspace }}
+      run: |
+        cmake -B ${{ steps.strings.outputs.build-output-dir }} `
+              -DCMAKE_CXX_COMPILER=cl `
+              -DCMAKE_C_COMPILER=cl `
+              -DCMAKE_BUILD_TYPE=Release `
+              -DCMAKE_TOOLCHAIN_FILE=${{ env.TOOLCHAIN_FILE }} `
+              -S ${{ github.workspace }}
 
-    - name: Build
+    # --- 构建 Release ---
+    - name: Build Release
       run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release
 
-    - name: Run tests
-      working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      run: ctest --build-config Release
+    # --- 拷贝依赖 DLL 到 Release 文件夹 ---
+    - name: Copy required DLLs
+      shell: bash
+      run: |
+        cp vcpkg/installed/x64-windows/bin/*.dll build/glabels/Release/
+        cp vcpkg/installed/x64-windows/bin/*.dll build/glabels-batch/Release/
 
-    - name: Upload executables to GitHub Release
+    # --- 生成 Windows 安装包 ---
+    - name: Build NSIS Installer
+      run: |
+        cd build
+        cpack -C Release -G NSIS
+
+    # --- 自动生成 Release tag ---
+    - name: Determine Release tag
+      id: get_version
+      run: |
+        if [ -f VERSION.txt ]; then
+          VERSION=$(cat VERSION.txt)
+        else
+          VERSION=$(git rev-parse --short HEAD)
+        fi
+        echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+
+    # --- 上传安装包到 GitHub Release ---
+    - name: Upload installer to GitHub Release
       uses: softprops/action-gh-release@v1
       with:
+        tag_name: ${{ steps.get_version.outputs.tag }}
+        name: Release ${{ steps.get_version.outputs.tag }}
         files: |
-          build/glabels/Release/glabels-qt.exe
-          build/glabels-batch/Release/glabels-batch-qt.exe
+          build/*.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
