@@ -72,34 +72,86 @@ jobs:
       working-directory: ${{ github.workspace }}/build
       run: ctest --build-config Release
 
+    - name: Debug build output
+      shell: bash
+      run: |
+        echo "=== Listing all files in build directory ==="
+        find build -type f | sort
+        echo "=== Looking for any executables ==="
+        find . -name "*.exe" -type f
+        echo "=== Build directory structure ==="
+        tree build || ls -R build
+
+    - name: Package complete build directory
+      shell: bash
+      run: |
+        echo "=== Creating complete build archive ==="
+        7z a glabels-qt-complete-build.zip ./build/*
+        ls -la glabels-qt-complete-build.zip
+
     - name: Package artifacts
       shell: bash
       run: |
         # 创建发布目录
         mkdir -p release
         
-        # 复制可执行文件（根据实际项目调整路径）
-        cp build/Release/*.exe release/ || cp build/*.exe release/ || echo "No .exe files found in expected locations"
+        # 调试：查看构建目录结构
+        echo "=== Build directory structure ==="
+        find build -name "*.exe" -type f 2>/dev/null || echo "No .exe files found with find"
+        ls -la build/ 2>/dev/null || echo "Build directory not found"
+        ls -la build/Release/ 2>/dev/null || echo "Build/Release directory not found"
+        ls -la build/Debug/ 2>/dev/null || echo "Build/Debug directory not found"
+        
+        # 查找所有 .exe 文件并复制
+        exe_found=false
+        if find build -name "*.exe" -type f | head -1 | read exe_file; then
+          echo "Found executable: $exe_file"
+          cp "$exe_file" release/
+          exe_found=true
+        fi
+        
+        # 如果没找到 .exe，尝试其他常见位置
+        if [ "$exe_found" = false ]; then
+          for dir in "build/Release" "build/Debug" "build" "build/bin" "build/src"; do
+            if [ -d "$dir" ]; then
+              echo "Checking directory: $dir"
+              ls -la "$dir"
+              if ls "$dir"/*.exe 1> /dev/null 2>&1; then
+                cp "$dir"/*.exe release/
+                exe_found=true
+                break
+              fi
+            fi
+          done
+        fi
+        
+        if [ "$exe_found" = false ]; then
+          echo "ERROR: No executable files found!"
+          echo "=== Complete build directory tree ==="
+          find build -type f 2>/dev/null | head -20
+          exit 1
+        fi
         
         # 复制依赖的 DLL 文件
-        windeployqt release/*.exe || echo "windeployqt not found or failed"
-        
-        # 复制其他必要文件
-        cp README.md release/ 2>/dev/null || echo "No README.md"
-        cp LICENSE* release/ 2>/dev/null || echo "No LICENSE file"
-        
-        # 打包
-        7z a glabels-qt-windows-x64.zip ./release/*
+        if ls release/*.exe 1> /dev/null 2>&1; then
+          echo "Running windeployqt..."
+          windeployqt release/*.exe || echo "windeployqt faile
 
     - name: Upload to Release
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: glabels-qt-windows-x64.zip
+        files: |
+          glabels-qt-windows-x64.zip
+          glabels-qt-complete-build.zip
         body: |
           ## Windows Release
           
           This release contains Windows binaries for glabels-qt.
+          
+          ### Files
+          - `glabels-qt-windows-x64.zip` - Ready-to-use application (if build successful)
+          - `glabels-qt-complete-build.zip` - Complete build directory for debugging
           
           ### Installation
           1. Download `glabels-qt-windows-x64.zip`
@@ -116,6 +168,8 @@ jobs:
       if: ${{ !startsWith(github.ref, 'refs/tags/') }}
       uses: actions/upload-artifact@v4
       with:
-        name: glabels-qt-windows-x64
-        path: glabels-qt-windows-x64.zip
+        name: glabels-qt-build-artifacts
+        path: |
+          glabels-qt-windows-x64.zip
+          glabels-qt-complete-build.zip
         retention-days: 30
