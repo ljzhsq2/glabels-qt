@@ -2,8 +2,9 @@ name: Windows Build & Release
 
 on:
   push:
-    branches:
-      - master  # 仅在 main 分支触发
+    tags:
+      - 'v*'  # 只在推送标签时触发
+  workflow_dispatch:  # 允许手动触发
 
 jobs:
   build:
