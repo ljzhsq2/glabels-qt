@@ -149,3 +149,4 @@ jobs:
           ${{ steps.strings.outputs.build-output-dir }}/Release/*.msi
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
