@@ -1,137 +1,136 @@
+# This workflow performs Windows build and uploads to release
+#
+# Only builds on:
+#     - windows-latest - cl (MSVC)
+#
+
 name: Windows Build and Release
 
 on:
   push:
-    branches:
-      - master  # 或者你想要触发编译的分支，例如 master
+    tags:
+      - 'v*'  # 只在推送标签时触发
+  workflow_dispatch:  # 允许手动触发
 
 jobs:
-  build:
+  build-windows:
     runs-on: windows-latest
 
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            build_type: Release
-            c_compiler: cl
-            cpp_compiler: cl
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        # Checkout full-depth to facilitate auto versioning
+        fetch-depth: 0
 
-      - name: Pre-install vcpkg (Windows)
-        if: startsWith( matrix.os, 'windows-' )
-        shell: bash
-        run: |
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git
+    - name: Pre-install vcpkg
+      shell: bash
+      run: |
+        git clone --depth 1 https://github.com/microsoft/vcpkg.git
 
-      - name: Restore vcpkg cache (Windows)
-        if: startsWith(matrix.os, 'windows-')
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ github.workspace }}/vcpkg/installed
-            ${{ github.workspace }}/vcpkg/downloads
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('.github/workflows/build-and-release.yml') }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-
+    - name: Restore vcpkg cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ github.workspace }}/vcpkg/installed
+          ${{ github.workspace }}/vcpkg/downloads
+        key: vcpkg-${{ runner.os }}-${{ hashFiles('.github/workflows/build-tests.yml') }}
+        restore-keys: |
+          vcpkg-${{ runner.os }}-
 
-      - name: Install optional dependencies (Windows)
-        if: startsWith( matrix.os, 'windows-' )
-        shell: bash
-        run: |
-          # install packages
-          ./vcpkg/bootstrap-vcpkg.sh
-          ./vcpkg/vcpkg install pkgconf zlib libqrencode zint
-          echo "TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
+    - name: Install dependencies
+      shell: bash
+      run: |
+        # install packages
+        ./vcpkg/bootstrap-vcpkg.sh
+        ./vcpkg/vcpkg install pkgconf
+        ./vcpkg/vcpkg install zlib
+        ./vcpkg/vcpkg install libqrencode
+        ./vcpkg/vcpkg install zint
+        echo "TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
 
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: '6.2.*'
-          install-deps: 'true'
-          archives: 'qtbase qtsvg qttools icu qttranslations'
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: '6.2.*'
+        install-deps: 'true'
+        archives: 'qtbase qtsvg qttools icu qttranslations'
 
-      - name: Set reusable strings
-        id: strings
-        shell: bash
-        run: |
-          echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+    - name: Configure CMake
+      run: >
+        cmake -B ${{ github.workspace }}/build
+        -DCMAKE_CXX_COMPILER=cl
+        -DCMAKE_C_COMPILER=cl
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_TOOLCHAIN_FILE=${{ env.TOOLCHAIN_FILE }}
+        -S ${{ github.workspace }}
 
-      - name: Configure CMake
-        run: >
-          cmake -B ${{ steps.strings.outputs.build-output-dir }}
-          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
-          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-          -DCMAKE_TOOLCHAIN_FILE=${{ env.TOOLCHAIN_FILE }}
-          -S ${{ github.workspace }}
+    - name: Build
+      run: cmake --build ${{ github.workspace }}/build --config Release
 
-      - name: Build
-        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+    - name: Test
+      working-directory: ${{ github.workspace }}/build
+      run: ctest --build-config Release
 
-      - name: Test (Windows)
-        if: startsWith( matrix.os, 'windows-' )
-        working-directory: ${{ steps.strings.outputs.build-output-dir }}
-        run: ctest --build-config ${{ matrix.build_type }}
+    - name: Package artifacts
+      shell: bash
+      run: |
+        # 创建发布目录
+        mkdir -p release
+        
+        # 复制可执行文件（根据实际项目调整路径）
+        cp build/Release/*.exe release/ || cp build/*.exe release/ || echo "No .exe files found in expected locations"
+        
+        # 复制依赖的 DLL 文件
+        windeployqt release/*.exe || echo "windeployqt not found or failed"
+        
+        # 复制其他必要文件
+        cp README.md release/ 2>/dev/null || echo "No README.md"
+        cp LICENSE* release/ 2>/dev/null || echo "No LICENSE file"
+        
+        # 打包
+        7z a glabels-qt-windows-x64.zip ./release/*
 
-      - name: Package application
-        id: package_app
-        shell: pwsh
-        run: |
-          # 找到编译好的可执行文件
-          $exePath = Get-ChildItem -Path "${{ steps.strings.outputs.build-output-dir }}\Release\*.exe" | Select-Object -First 1
-          if (-not $exePath) {
-              Write-Host "Error: No executable found in the build directory."
-              exit 1
-          }
+    - name: Create Release
+      id: create_release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref_name }}
+        release_name: Release ${{ github.ref_name }}
+        draft: false
+        prerelease: false
+        body: |
+          ## Windows Release
           
-          # 创建一个临时的打包目录
-          $tempDir = New-Item -Path ".\temp_package" -ItemType "directory"
+          This release contains Windows binaries for glabels-qt.
           
-          # 将可执行文件复制到打包目录
-          Copy-Item -Path $exePath.FullName -Destination $tempDir.FullName
+          ### Installation
+          1. Download `glabels-qt-windows-x64.zip`
+          2. Extract to desired location
+          3. Run the executable
           
-          # 使用 windeployqt.exe 自动复制所需的 Qt 依赖项
-          # 找到 windeployqt.exe 的路径
-          $windeployqtPath = "${{ env.QT_ROOT_DIR }}\bin\windeployqt.exe"
-          if (-not (Test-Path $windeployqtPath)) {
-              Write-Host "Error: windeployqt.exe not found."
-              exit 1
-          }
-          
-          # 运行 windeployqt
-          & $windeployqtPath $tempDir.FullName\$($exePath.Name) --no-translations
-          
-          # 找到 vcpkg 提供的依赖项并复制（例如 zlib, zint 等）
-          # 这部分需要根据实际依赖调整
-          $vcpkgInstalledDir = "${{ github.workspace }}\vcpkg\installed\x64-windows"
-          Copy-Item -Path "$vcpkgInstalledDir\bin\*.dll" -Destination $tempDir.FullName
-          
-          # 将打包目录压缩成 zip
-          Compress-Archive -Path $tempDir.FullName -DestinationPath "glabels-qt-windows.zip"
-          
-          Write-Host "::set-output name=archive-path::glabels-qt-windows.zip"
-          Write-Host "::set-output name=archive-name::glabels-qt-windows.zip"
-          
-      - name: Create GitHub Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ github.run_number }}
-          release_name: Release ${{ github.run_number }}
-          draft: false
-          prerelease: false
+          ### Changes
+          - Built with MSVC on Windows
+          - Includes all necessary dependencies
 
-      - name: Upload Release Asset
-        id: upload-release-asset 
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Upload Release Asset
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./glabels-qt-windows-x64.zip
+        asset_name: glabels-qt-windows-x64.zip
+        asset_content_type: application/zip
+
+    - name: Upload artifacts (for manual runs)
+      if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: glabels-qt-windows-x64
+        path: glabels-qt-windows-x64.zip
+        retention-days: 30
