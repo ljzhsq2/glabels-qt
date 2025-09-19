@@ -1,32 +1,23 @@
-# This workflow performs Windows build and uploads to release
-#
-# Only builds on:
-#     - windows-latest - cl (MSVC)
-#
-
-name: Windows Build and Release
+name: Windows Build & Release
 
 on:
   push:
-    tags:
-      - 'v*'  # 只在推送标签时触发
-  workflow_dispatch:  # 允许手动触发
+    branches:
+      - main  # 仅在 main 分支触发
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
 
     steps:
-    - name: Checkout
+    - name: Checkout code
       uses: actions/checkout@v4
       with:
-        # Checkout full-depth to facilitate auto versioning
         fetch-depth: 0
 
     - name: Pre-install vcpkg
       shell: bash
-      run: |
-        git clone --depth 1 https://github.com/microsoft/vcpkg.git
+      run: git clone --depth 1 https://github.com/microsoft/vcpkg.git
 
     - name: Restore vcpkg cache
       uses: actions/cache@v4
@@ -34,19 +25,15 @@ jobs:
         path: |
           ${{ github.workspace }}/vcpkg/installed
           ${{ github.workspace }}/vcpkg/downloads
-        key: vcpkg-${{ runner.os }}-${{ hashFiles('.github/workflows/build-tests.yml') }}
+        key: vcpkg-windows-${{ hashFiles('.github/workflows/build-tests.yml') }}
         restore-keys: |
-          vcpkg-${{ runner.os }}-
+          vcpkg-windows-
 
-    - name: Install dependencies
+    - name: Install optional dependencies
       shell: bash
       run: |
-        # install packages
         ./vcpkg/bootstrap-vcpkg.sh
-        ./vcpkg/vcpkg install pkgconf
-        ./vcpkg/vcpkg install zlib
-        ./vcpkg/vcpkg install libqrencode
-        ./vcpkg/vcpkg install zint
+        ./vcpkg/vcpkg install pkgconf zlib libqrencode zint
         echo "TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
 
     - name: Install Qt
@@ -56,9 +43,14 @@ jobs:
         install-deps: 'true'
         archives: 'qtbase qtsvg qttools icu qttranslations'
 
+    - name: Set build directory
+      id: strings
+      shell: bash
+      run: echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+
     - name: Configure CMake
       run: >
-        cmake -B ${{ github.workspace }}/build
+        cmake -B ${{ steps.strings.outputs.build-output-dir }}
         -DCMAKE_CXX_COMPILER=cl
         -DCMAKE_C_COMPILER=cl
         -DCMAKE_BUILD_TYPE=Release
@@ -66,110 +58,17 @@ jobs:
         -S ${{ github.workspace }}
 
     - name: Build
-      run: cmake --build ${{ github.workspace }}/build --config Release
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release
 
-    - name: Test
-      working-directory: ${{ github.workspace }}/build
+    - name: Run tests
+      working-directory: ${{ steps.strings.outputs.build-output-dir }}
       run: ctest --build-config Release
 
-    - name: Debug build output
-      shell: bash
-      run: |
-        echo "=== Listing all files in build directory ==="
-        find build -type f | sort
-        echo "=== Looking for any executables ==="
-        find . -name "*.exe" -type f
-        echo "=== Build directory structure ==="
-        tree build || ls -R build
-
-    - name: Package complete build directory
-      shell: bash
-      run: |
-        echo "=== Creating complete build archive ==="
-        7z a glabels-qt-complete-build.zip ./build/*
-        ls -la glabels-qt-complete-build.zip
-
-    - name: Package artifacts
-      shell: bash
-      run: |
-        # 创建发布目录
-        mkdir -p release
-        
-        # 调试：查看构建目录结构
-        echo "=== Build directory structure ==="
-        find build -name "*.exe" -type f 2>/dev/null || echo "No .exe files found with find"
-        ls -la build/ 2>/dev/null || echo "Build directory not found"
-        ls -la build/Release/ 2>/dev/null || echo "Build/Release directory not found"
-        ls -la build/Debug/ 2>/dev/null || echo "Build/Debug directory not found"
-        
-        # 查找所有 .exe 文件并复制
-        exe_found=false
-        if find build -name "*.exe" -type f | head -1 | read exe_file; then
-          echo "Found executable: $exe_file"
-          cp "$exe_file" release/
-          exe_found=true
-        fi
-        
-        # 如果没找到 .exe，尝试其他常见位置
-        if [ "$exe_found" = false ]; then
-          for dir in "build/Release" "build/Debug" "build" "build/bin" "build/src"; do
-            if [ -d "$dir" ]; then
-              echo "Checking directory: $dir"
-              ls -la "$dir"
-              if ls "$dir"/*.exe 1> /dev/null 2>&1; then
-                cp "$dir"/*.exe release/
-                exe_found=true
-                break
-              fi
-            fi
-          done
-        fi
-        
-        if [ "$exe_found" = false ]; then
-          echo "ERROR: No executable files found!"
-          echo "=== Complete build directory tree ==="
-          find build -type f 2>/dev/null | head -20
-          exit 1
-        fi
-        
-        # 复制依赖的 DLL 文件
-        if ls release/*.exe 1> /dev/null 2>&1; then
-          echo "Running windeployqt..."
-          windeployqt release/*.exe || echo "windeployqt faile
-
-    - name: Upload to Release
-      if: startsWith(github.ref, 'refs/tags/')
+    - name: Upload executables to GitHub Release
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          glabels-qt-windows-x64.zip
-          glabels-qt-complete-build.zip
-        body: |
-          ## Windows Release
-          
-          This release contains Windows binaries for glabels-qt.
-          
-          ### Files
-          - `glabels-qt-windows-x64.zip` - Ready-to-use application (if build successful)
-          - `glabels-qt-complete-build.zip` - Complete build directory for debugging
-          
-          ### Installation
-          1. Download `glabels-qt-windows-x64.zip`
-          2. Extract to desired location
-          3. Run the executable
-          
-          ### Changes
-          - Built with MSVC on Windows
-          - Includes all necessary dependencies
+          build/glabels/Release/glabels-qt.exe
+          build/glabels-batch/Release/glabels-batch-qt.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Upload artifacts (for manual runs)
-      if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: glabels-qt-build-artifacts
-        path: |
-          glabels-qt-windows-x64.zip
-          glabels-qt-complete-build.zip
-        retention-days: 30
