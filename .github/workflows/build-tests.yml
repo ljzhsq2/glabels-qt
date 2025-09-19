@@ -47,7 +47,7 @@ jobs:
 
     # --- 安装 NSIS ---
     - name: Install NSIS
-      shell: choco
+      shell: powershell
       run: choco install nsis -y
 
     # --- 设置构建目录 ---
@@ -86,6 +86,7 @@ jobs:
     # --- 自动生成 Release tag ---
     - name: Determine Release tag
       id: get_version
+      shell: bash
       run: |
         if [ -f VERSION.txt ]; then
           VERSION=$(cat VERSION.txt)
