@@ -1,79 +1,87 @@
-name: Windows Build & Release
+name: Windows Build and Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main  # 或者你想要触发编译的分支，例如 master
 
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Pre-install vcpkg
-      shell: bash
-      run: |
-        git clone --depth 1 https://github.com/microsoft/vcpkg.git
+      - name: Pre-install vcpkg (Windows)
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git
 
-    - name: Restore vcpkg cache
-      uses: actions/cache@v4
-      with:
-        path: |
-          ${{ github.workspace }}/vcpkg/installed
-          ${{ github.workspace }}/vcpkg/downloads
-        key: vcpkg-${{ runner.os }}-${{ hashFiles('.github/workflows/windows-build.yml') }}
-        restore-keys: |
-          vcpkg-${{ runner.os }}-
+      - name: Restore vcpkg cache (Windows)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/vcpkg/installed
+            ${{ github.workspace }}/vcpkg/downloads
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('.github/workflows/build-and-release.yml') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
 
-    - name: Install optional dependencies (Windows)
-      shell: bash
-      run: |
-        ./vcpkg/bootstrap-vcpkg.sh
-        ./vcpkg/vcpkg install pkgconf
-        ./vcpkg/vcpkg install zlib
-        ./vcpkg/vcpkg install libqrencode
-        ./vcpkg/vcpkg install zint
-        echo "TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
+      - name: Install dependencies with vcpkg
+        shell: bash
+        run: |
+          ./vcpkg/bootstrap-vcpkg.sh
+          ./vcpkg/vcpkg install pkgconf zlib libqrencode zint
+          echo "TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
 
-    - name: Install Qt
-      uses: jurplel/install-qt-action@v4
-      with:
-        version: '6.2.*'
-        install-deps: 'true'
-        archives: 'qtbase qtsvg qttools icu qttranslations'
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.2.*'
+          install-deps: 'true'
+          archives: 'qtbase qtsvg qttools icu qttranslations'
 
-    - name: Set reusable strings
-      id: strings
-      shell: bash
-      run: |
-        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+      - name: Configure CMake
+        run: >
+          cmake -B ${{ github.workspace }}/build
+          -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE=${{ env.TOOLCHAIN_FILE }}
+          -S ${{ github.workspace }}
 
-    - name: Configure CMake
-      run: >
-        cmake -B ${{ steps.strings.outputs.build-output-dir }}
-        -DCMAKE_CXX_COMPILER=cl
-        -DCMAKE_C_COMPILER=cl
-        -DCMAKE_BUILD_TYPE=Release
-        -DCMAKE_TOOLCHAIN_FILE=${{ env.TOOLCHAIN_FILE }}
-        -S ${{ github.workspace }}
+      - name: Build
+        run: cmake --build ${{ github.workspace }}/build --config Release
 
-    - name: Build
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release
+      - name: Package build artifacts
+        shell: bash
+        run: |
+          # 假设你的可执行文件在 build/Release 目录下
+          cd ${{ github.workspace }}/build/Release
+          # 创建一个 zip 包，包含所有需要的文件
+          zip -r glabels-qt-windows.zip ./*
 
-    - name: Test
-      working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      run: ctest --build-config Release
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ github.run_number }}
+          release_name: Release ${{ github.run_number }}
+          draft: false
+          prerelease: false
 
-    - name: Upload Release Asset
-      uses: softprops/action-gh-release@v2
-      with:
-        files: |
-          ${{ steps.strings.outputs.build-output-dir }}/Release/*.exe
-          ${{ steps.strings.outputs.build-output-dir }}/Release/*.msi
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Release Asset
+        id: upload-release-asset 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ github.workspace }}/build/Release/glabels-qt-windows.zip
+          asset_name: glabels-qt-windows.zip
+          asset_content_type: application/zip
